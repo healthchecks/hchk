@@ -1,15 +1,21 @@
 import click
-import configparser
 import os
 import requests
 import sys
+
+try:
+    # Python 3
+    from configparser import RawConfigParser
+except ImportError:
+    # Python 2
+    from ConfigParser import RawConfigParser
 
 CHECK_ARGS = ("name", "tags", "period", "grace")
 INI_PATH = os.path.join(os.path.expanduser("~"), ".hchk")
 
 
 def get_config():
-    config = configparser.RawConfigParser()
+    config = RawConfigParser()
     if os.path.exists(INI_PATH):
         config.read(INI_PATH)
     return config

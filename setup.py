@@ -9,7 +9,7 @@ dependencies = ['click', 'requests']
 
 setup(
     name='hchk',
-    version='0.1.0',
+    version='0.1.2',
     url='https://github.com/healthchecks/hchk',
     license='BSD',
     author='Pēteris Caune',

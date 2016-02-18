@@ -35,6 +35,9 @@ def get_option(config, section, option):
 def get_ping_url(check, recreate=False):
     config = get_config()
     for code in config.sections():
+        if code == "hchk":
+            continue
+
         match = True
         for key in CHECK_ARGS:
             if get_option(config, code, key) != check[key]:

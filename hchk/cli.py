@@ -17,6 +17,10 @@ CHECK_ARGS = ("name", "tags", "period", "grace")
 INI_PATH = os.path.join(os.path.expanduser("~"), ".hchk")
 VERSION = pkg_resources.get_distribution("hchk").version
 UA = "hchk/%s" % VERSION
+USE_SSL = True
+if sys.version_info[0:3] < (2, 7, 9):
+    # Certificate validation is a mess on Python < 2.7.9
+    USE_SSL = False
 
 
 class Api(object):
@@ -36,7 +40,8 @@ class Api(object):
 
         url = "https://healthchecks.io/api/v1/checks/"
         data = json.dumps(payload)
-        r = requests.post(url, data=data, headers={"User-Agent": UA})
+        r = requests.post(url, data=data, headers={"User-Agent": UA},
+                          verify=USE_SSL)
         parsed = r.json()
         if "error" in r:
             raise ValueError(r["error"])
@@ -59,15 +64,19 @@ class Check(dict):
         """Run HTTP GET to self["ping_url"].
 
         On errors, retry with exponential backoff.
+        On Python version below 2.7.9 fall back from https to http.
 
         """
+
+        url = self["ping_url"]
+        if url.startswith("https://") and not USE_SSL:
+            url = url.replace("https://", "http://")
 
         retries = 0
         while True:
             status = 0
             try:
-                r = requests.get(self["ping_url"], timeout=10,
-                                 headers={"User-Agent": UA})
+                r = requests.get(url, timeout=10, headers={"User-Agent": UA})
                 status = r.status_code
             except requests.exceptions.ConnectionError:
                 sys.stderr.write("Connection error\n")

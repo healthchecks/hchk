@@ -4,6 +4,7 @@ import os
 import pkg_resources
 import requests
 import sys
+import time
 
 try:
     # Python 3
@@ -55,8 +56,39 @@ class Check(dict):
         self["ping_url"] = api.create_check(self)
 
     def ping(self):
-        r = requests.get(self["ping_url"], headers={"User-Agent": UA})
-        return r.status_code
+        """Run HTTP GET to self["ping_url"].
+
+        On errors, retry with exponential backoff.
+
+        """
+
+        retries = 0
+        while True:
+            status = 0
+            try:
+                r = requests.get(self["ping_url"], timeout=10,
+                                 headers={"User-Agent": UA})
+                status = r.status_code
+            except requests.exceptions.ConnectionError:
+                sys.stderr.write("Connection error\n")
+            except requests.exceptions.Timeout:
+                sys.stderr.write("Connection timed out\n")
+            else:
+                if status not in (200, 400):
+                    sys.stderr.write("Received HTTP status %d\n" % status)
+
+            # 200 is success, 400 is most likely "check does not exist"
+            if status in (200, 400):
+                return status
+
+            # In any other case, let's retry with exponential backoff:
+            delay, retries = 2 ** retries, retries + 1
+            if retries >= 5:
+                sys.stderr.write("Exceeded max retries, giving up\n")
+                return 0
+
+            sys.stderr.write("Will retry after %ds\n" % delay)
+            time.sleep(delay)
 
 
 class Config(RawConfigParser):
@@ -152,8 +184,6 @@ def ping(**kwargs):
         status = check.ping()
 
     if status != 200:
-        tmpl = "Could not ping %s, received HTTP status %d\n"
-        sys.stderr.write(tmpl % (check["ping_url"], status))
         sys.exit(1)
 
 

@@ -1,5 +1,7 @@
 import click
+import json
 import os
+import pkg_resources
 import requests
 import sys
 
@@ -12,72 +14,95 @@ except ImportError:
 
 CHECK_ARGS = ("name", "tags", "period", "grace")
 INI_PATH = os.path.join(os.path.expanduser("~"), ".hchk")
+VERSION = pkg_resources.get_distribution("hchk").version
+UA = "hchk/%s" % VERSION
 
 
-def get_config():
-    config = RawConfigParser()
-    if os.path.exists(INI_PATH):
-        config.read(INI_PATH)
-    return config
+class Api(object):
+    def __init__(self, api_key):
+        self.api_key = api_key
+
+    def create_check(self, check):
+        payload = {"api_key": self.api_key}
+        if check.get("name"):
+            payload["name"] = check["name"]
+        if check.get("tags"):
+            payload["tags"] = check["tags"]
+        if check.get("period"):
+            payload["timeout"] = int(check["period"])
+        if check.get("grace"):
+            payload["grace"] = int(check["grace"])
+
+        url = "https://healthchecks.io/api/v1/checks/"
+        data = json.dumps(payload)
+        r = requests.post(url, data=data, headers={"User-Agent": UA})
+        parsed = r.json()
+        if "error" in r:
+            raise ValueError(r["error"])
+
+        return parsed["ping_url"]
 
 
-def save_config(config):
-    with open(INI_PATH, 'w') as f:
-        config.write(f)
-
-
-def get_option(config, section, option):
-    if not config.has_option(section, option):
-        return ""
-    return config.get(section, option)
-
-
-def get_ping_url(check, recreate=False):
-    config = get_config()
-    for code in config.sections():
-        if code == "hchk":
-            continue
-
-        match = True
+class Check(dict):
+    def matches_spec(self, spec):
         for key in CHECK_ARGS:
-            if get_option(config, code, key) != check[key]:
-                match = False
+            if self.get(key) != spec.get(key):
+                return False
 
-        if match and recreate:
-            config.remove_section(code)
+        return True
 
-        if match and config.has_option(code, "ping_url"):
-            return config.get(code, "ping_url")
+    def create(self, api):
+        self["ping_url"] = api.create_check(self)
 
-    # The check doesn't exist, let's create it
-    url = "https://healthchecks.io/api/v1/checks/"
-    payload = {}
-    if check["name"]:
-        payload["name"] = check["name"]
-    if check["tags"]:
-        payload["tags"] = check["tags"]
-    if check["period"]:
-        payload["timeout"] = int(check["period"])
-    if check["grace"]:
-        payload["grace"] = int(check["grace"])
+    def ping(self):
+        r = requests.get(self["ping_url"], headers={"User-Agent": UA})
+        return r.status_code
 
-    if check["api_key"]:
-        payload["api_key"] = check["api_key"]
-    elif config.has_option("hchk", "api_key"):
-        payload["api_key"] = config.get("hchk", "api_key")
 
-    r = requests.post(url, json=payload).json()
-    if "error" in r:
-        raise ValueError(r["error"])
+class Config(RawConfigParser):
+    def __init__(self):
+        # RawConfigParser is old-style class, so don't use super()
+        RawConfigParser.__init__(self)
+        self.read(INI_PATH)
 
-    code = r["ping_url"].split("/")[-1]
-    config.add_section(code)
-    config.set(code, "ping_url", r["ping_url"])
-    for key in CHECK_ARGS:
-        config.set(code, key, check[key])
+    def save(self):
+        with open(INI_PATH, 'w') as f:
+            self.write(f)
 
-    save_config(config)
-    return r["ping_url"]
+    def find(self, spec):
+        for section in self.sections():
+            if not self.has_option(section, "ping_url"):
+                continue
+
+            candidate = Check(self.items(section))
+            if candidate.matches_spec(spec):
+                candidate["_section"] = section
+                return candidate
+
+    def save_check(self, check):
+        # First, remove all checks with similar specs
+        while True:
+            other = self.find(check)
+            if other is None:
+                break
+
+            self.remove_section(other["_section"])
+
+        # Then save this check
+        code = check["ping_url"].split("/")[-1]
+        self.add_section(code)
+        self.set(code, "ping_url", check["ping_url"])
+        for key in CHECK_ARGS:
+            if check.get(key):
+                self.set(code, key, check[key])
+
+        self.save()
+
+    def get_api_key(self):
+        if not self.has_option("hchk", "api_key"):
+            return None
+
+        return self.get("hchk", "api_key")
 
 
 @click.group()
@@ -88,26 +113,47 @@ def cli():
 
 
 @cli.command()
-@click.option('--api-key', '-k', help='API key for authentication')
-@click.option('--name', '-n', default="", help='Name for the new check')
-@click.option('--tags', '-t', default="",
+@click.option('--name', '-n', help='Name for the new check')
+@click.option('--tags', '-t',
               help='Space-delimited list of tags for the new check')
-@click.option('--period', '-p', default="", help='Period, a number of seconds')
-@click.option('--grace', '-g', default="",
-              help='Grace time, a number of seconds')
+@click.option('--period', '-p', help='Period, a number of seconds')
+@click.option('--grace', '-g', help='Grace time, a number of seconds')
 def ping(**kwargs):
     """Create a check if neccessary, then ping it."""
 
-    url = get_ping_url(kwargs)
-    r = requests.get(url)
-    if r.status_code == 400:
-        # Let's try and recreate it:
-        url = get_ping_url(kwargs, recreate=True)
-        r = requests.get(url)
+    config = Config()
+    api_key = config.get_api_key()
+    if api_key is None:
+        msg = """API key is not set. Please set it with
 
-    if r.status_code != 200:
+    hchk setkey YOUR_API_KEY
+
+"""
+        sys.stderr.write(msg)
+        sys.exit(1)
+
+    api = Api(api_key)
+
+    spec = {}
+    for key in CHECK_ARGS:
+        if kwargs.get(key):
+            spec[key] = kwargs[key]
+
+    check = config.find(spec)
+    if check is None:
+        check = Check(spec)
+        check.create(api)
+        config.save_check(check)
+
+    status = check.ping()
+    if status == 400:
+        check.create(api)
+        config.save_check(check)
+        status = check.ping()
+
+    if status != 200:
         tmpl = "Could not ping %s, received HTTP status %d\n"
-        sys.stderr.write(tmpl % (url, r.status_code))
+        sys.stderr.write(tmpl % (check["ping_url"], status))
         sys.exit(1)
 
 
@@ -116,11 +162,11 @@ def ping(**kwargs):
 def setkey(api_key):
     """Save API key in $HOME/.hchk"""
 
-    config = get_config()
+    config = Config()
     if not config.has_section("hchk"):
         config.add_section("hchk")
 
     config.set("hchk", "api_key", api_key)
-    save_config(config)
+    config.save()
 
     print("API key saved!")

@@ -18,6 +18,7 @@ INI_PATH = os.path.join(os.path.expanduser("~"), ".hchk")
 VERSION = pkg_resources.get_distribution("hchk").version
 UA = "hchk/%s" % VERSION
 USE_SSL = True
+API_ENDPOINT = os.environ.get("HEALTHCHECKS_API_ENDPOINT", "https://healthchecks.io/api/v1/checks/")
 if sys.version_info[0:3] < (2, 7, 9):
     # Certificate validation is a mess on Python < 2.7.9
     USE_SSL = False
@@ -38,7 +39,7 @@ class Api(object):
         if check.get("grace"):
             payload["grace"] = int(check["grace"])
 
-        url = "https://healthchecks.io/api/v1/checks/"
+        url = API_ENDPOINT
         data = json.dumps(payload)
         r = requests.post(url, data=data, headers={"User-Agent": UA},
                           verify=USE_SSL)

@@ -182,6 +182,16 @@ def ping(**kwargs):
         sys.stderr.write(msg)
         sys.exit(1)
 
+    if api_url is None:
+        msg = """API Url is not set. Please set it with
+
+    hchk setkey YOUR_API_URL
+
+"""
+
+        sys.stderr.write(msg)
+        sys.exit(1)
+
     api = Api(api_key, api_url)
 
     spec = {}

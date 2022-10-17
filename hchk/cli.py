@@ -222,7 +222,7 @@ def setkey(api_key):
 
 @cli.command()
 @click.argument('api_url')
-def setkey(api_url):
+def setapi(api_url):
     """Save API url in $HOME/.hchk"""
 
     config = Config()

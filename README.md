@@ -1,7 +1,11 @@
 # healthchecks.io CLI
 
-A CLI interface to healthchecks.io
+[![Not Maintained](https://img.shields.io/badge/Maintenance%20Level-Not%20Maintained-yellow.svg)](https://gist.github.com/cheerfulstoic/d107229326a01ff0f333a1d3476e068d)
 
+A CLI interface to healthchecks.io. This project **is not maintained**, and I currently
+have no plans to develop it further. For alternative, better, and actively maintained
+CLI tools, please see [Third-Party Resources](https://healthchecks.io/docs/resources/)
+on Healthchecks.io.
 
 # Installation
 

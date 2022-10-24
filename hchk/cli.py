@@ -24,8 +24,9 @@ if sys.version_info[0:3] < (2, 7, 9):
 
 
 class Api(object):
-    def __init__(self, api_key):
+    def __init__(self, api_key, api_url):
         self.api_key = api_key
+        self.api_url = api_url
 
     def create_check(self, check):
         payload = {"api_key": self.api_key}
@@ -38,7 +39,7 @@ class Api(object):
         if check.get("grace"):
             payload["grace"] = int(check["grace"])
 
-        url = "https://healthchecks.io/api/v1/checks/"
+        url = api_url
         data = json.dumps(payload)
         r = requests.post(url, data=data, headers={"User-Agent": UA},
                           verify=USE_SSL)
@@ -146,6 +147,12 @@ class Config(RawConfigParser):
         return self.get("hchk", "api_key")
 
 
+    def get_api_url(self):
+        if not self.has_option("hchk", "api_url"):
+            return "https://healthchecks.io/api/v1/checks/"
+
+        return self.get("hchk", "api_key")
+
 @click.group()
 def cli():
     """A CLI interface to healthchecks.io"""
@@ -164,16 +171,28 @@ def ping(**kwargs):
 
     config = Config()
     api_key = config.get_api_key()
+    api_url = config.get_api_url()
     if api_key is None:
         msg = """API key is not set. Please set it with
 
     hchk setkey YOUR_API_KEY
 
 """
+
         sys.stderr.write(msg)
         sys.exit(1)
 
-    api = Api(api_key)
+    if api_url is None:
+        msg = """API Url is not set. Please set it with
+
+    hchk setkey YOUR_API_URL
+
+"""
+
+        sys.stderr.write(msg)
+        sys.exit(1)
+
+    api = Api(api_key, api_url)
 
     spec = {}
     for key in CHECK_ARGS:
@@ -209,3 +228,18 @@ def setkey(api_key):
     config.save()
 
     print("API key saved!")
+
+
+@cli.command()
+@click.argument('api_url')
+def setapi(api_url):
+    """Save API url in $HOME/.hchk"""
+
+    config = Config()
+    if not config.has_section("hchk"):
+        config.add_section("hchk")
+
+    config.set("hchk", "api_url", api_url)
+    config.save()
+
+    print("API url saved!")    
